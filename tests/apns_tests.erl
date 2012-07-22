@@ -5,12 +5,12 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("eunit.hrl").
 -define(DUKE_PROD_TOKEN, "556890033300BD4140BECF44963CEBAA5C082784B507CB23C79B899D3CC1726A").
--define(DEVICE_TOKEN, "139D3CAB173FB230B97E4A19D288E3FBCD4B037F9B18ABA17FE4CDE72085E994").
+-define(DEVICE_TOKEN, "A537459B630B73A8FD076E43C7CC840994CE7B8C843C33C0546B8C3801154723").
 %-define(DEVICE_TOKEN, "139D3CAB173AB230B97E4A19D288E3FBCD4B037F9B18ABA17FE4CDE72085E994"). %% Wrong
 
 -define(TEST_CONNECTION, 'test-connection').
 
--export([main/0]).
+-export([main/0, send_message/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% EXTERNAL FUNCTIONS
@@ -33,6 +33,11 @@ apns_test_() ->
    end,
    {timeout, 120000, fun run/0}
    }.
+
+send_message(Text) ->
+    apns_scheduler:send_message(Text,
+			       0,
+			       ?DEVICE_TOKEN).
 
 %%% Tests
 run() ->

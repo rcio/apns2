@@ -6,10 +6,11 @@
   {applications, [
                   kernel,
                   stdlib,
-                  ssl
+                  ssl,
+		  mnesia
                  ]},
   {mod, {apns_app, []}},
-  {env, [{apple_host,       "gateway.sandbox.push.apple.com"},
+  {env, [{apple_host,       "gateway.push.apple.com"},
          {apple_port,       2195},
          {cert_file,        "priv/cert.pem"},
          {key_file,         undefined},
