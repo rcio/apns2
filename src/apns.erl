@@ -93,8 +93,11 @@ send_badge(ConnId, DeviceToken, Badge) ->
   send_message(ConnId, #apns_msg{device_token = DeviceToken,
                                  badge = Badge}).
 
-%% @doc Sends a message to Apple with just an alert
--spec send_message(conn_id(), string(), alert()) -> ok.
+send_message(DeviceToken, Alert, Badge) when is_list(DeviceToken)->
+    apns_scheduler:send_message(Alert,
+			       Badge,
+			       DeviceToken);
+
 send_message(ConnId, DeviceToken, Alert) ->
   send_message(ConnId, #apns_msg{device_token = DeviceToken,
                                  alert = Alert}).
