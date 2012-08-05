@@ -20,7 +20,8 @@
 -spec start(normal | {takeover, node()} | {failover, node()}, term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
     apns_sup:start_link(),
-    apns_scheduler_sup:start_link().
+    apns_scheduler_sup:start_link(),
+    ok.
 
 %% @hidden
 -spec stop([]) -> ok.
