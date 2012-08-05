@@ -20,12 +20,13 @@
 
 -export([send_message/3, send_message_failed/1, done_working/1, stop_working/1]).
 
--export([save_message/1, get_first_message/0, save_test_mesg/0]).
+-export([save_message/1, get_first_message/0]).
 
 -record(state, {plist = [],
 	       current_p_count = 0,
 	       max_p_count = 100,
-	       running = true}).
+	       running = true,
+	       connection = #apns_connection{}}).
 
 -define(SERVER, ?MODULE).
 %%====================================================================
@@ -48,6 +49,11 @@ send_message_failed(Msg) ->
     gen_server:call(?MODULE, {send_message_failed, Msg}).
 
 done_working(Pid) ->
+    %% dead loop
+    receive 
+	after 100 ->
+		ture
+	end,
     gen_server:cast(?MODULE, {done_working, Pid}).
 
 stop_working(Pid) ->
@@ -68,7 +74,6 @@ init([]) ->
     mnesia:create_table(apns_msg, [{attributes, record_info(fields, apns_msg)},
 				     {type, ordered_set},
 				     {disc_copies, [node()]}]),
-    
     {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -80,9 +85,13 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({send_message_failed, Msg}, _From, #state{plist = [Pid|T]}) ->
-    apns:send_message(Pid, Msg),
-    {noreply, #state{plist = T}};
+handle_call({send_message_failed, Msg}, _From, State = #state{plist = []}) ->
+    save_message(Msg),
+    {reply, ok, State};
+
+handle_call({send_message_failed, Msg}, _From, State = #state{plist = [Pid|T]}) ->
+    apns_connection:send_message(Pid, Msg),
+    {reply, ok, State#state{plist = T}};
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
@@ -94,11 +103,11 @@ handle_call(_Request, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({send_message, Msg}, State = #state{plist = [], current_p_count = Current, max_p_count = Max}) ->
+handle_cast({send_message, Msg}, State = #state{plist = [], current_p_count = Current, max_p_count = Max, connection = Connection}) ->
     error_logger:info_msg("current ~p, max ~p ~p~n", [Current, Max, State]),
     case Current < Max of
 	true ->
-	    case send_message_via_new_connection(Msg) of
+	    case send_message_via_new_connection(Msg, Connection) of
 		true ->
 		    {noreply, State#state{current_p_count = Current + 1}};
 		_ ->
@@ -111,27 +120,20 @@ handle_cast({send_message, Msg}, State = #state{plist = [], current_p_count = Cu
     end;
 
 handle_cast({send_message, Msg}, #state{plist = [Pid|T]}) ->
-    apns:send_message(Pid, Msg),
+    apns_connection:send_message(Pid, Msg),
     {noreply, #state{plist = T}};
 
 handle_cast({done_working, Pid}, State) ->
-    error_logger:info_msg("~p done working~n", [Pid]),
     case get_first_message() of
 	[] ->
 	    {noreply, #state{plist = lists:append(State#state.plist, [Pid])}};
 	[Msg|_T] when is_record(Msg, apns_msg) ->
-	    apns:send_message(Pid, Msg),
+	    mnesia:dirty_delete_object(Msg),
+	    apns_connection:send_message(Pid, Msg),
 	    {noreply, State}
     end;
 
 handle_cast({stop_working, Pid}, State = #state{plist = Plist, running = _Running}) ->
-    %% [NewPid|T] = lists:delete(Pid, Plist),
-    %% case Running of
-    %%    true ->
-    %% 	    apns:send_message(NewPid, Msg);
-    %%    false ->
-    %% 	    save_message(Msg)
-    %% end,
     New = lists:delete(Pid, Plist),
     {noreply, State#state{plist = New}};
     
@@ -167,44 +169,28 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-save_test_mesg() ->
-    Mesg1 = #apns_msg{id= 6, device_token = "1111"},
-    save_message(Mesg1),
-    Mesg2 = #apns_msg{id= 2, device_token = "2222"},
-    save_message(Mesg2),
-    Mesg3 = #apns_msg{id= 3, device_token = "3333"},
-    save_message(Mesg3),
-    Mesg4 = #apns_msg{id= 4, device_token = "4444"},
-    save_message(Mesg4),
-    Mesg5 = #apns_msg{id= 5, device_token = "5555"},
-    save_message(Mesg5).
-
 save_message(Msg) when is_record(Msg, apns_msg) ->
-    F = fun() ->
-		mnesia:write(Msg)
-	end,
-    mnesia:transaction(F).
+    mnesia:dirty_write(Msg).
 
 get_first_message() ->
-    F = fun() ->
-		Key = mnesia:first(apns_msg),
-		Msg = mnesia:read({apns_msg, Key}),
-		mnesia:delete({apns_msg, Key}),
-		Msg
-	end,
-    case mnesia:transaction(F) of
-	{atomic, ResList} ->
+    Key = mnesia:dirty_first(apns_msg),
+    Msg = mnesia:dirty_read({apns_msg, Key}),
+    case Msg of
+	ResList when is_list(ResList) ->
 	    ResList;
 	_ ->
 	    []
     end.
 
-send_message_via_new_connection(Msg) ->
-    case apns:connect() of
+send_message_via_new_connection(Msg, Connection) ->
+    case connect(Connection) of
 	{ok, Pid} ->
-	    apns:send_message(Pid, Msg),
+	    apns_connection:send_message(Pid, Msg),
 	    true;
 	Error ->
 	    error_logger:error_msg("Create new conection porcess error ~p", [Error]),
 	    false
     end.
+
+connect(Connection) ->
+    apns_sup:start_connection(Connection).

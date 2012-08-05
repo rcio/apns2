@@ -91,7 +91,8 @@ handle_cast(Msg, State) when is_record(Msg, apns_msg) ->
 		{error, Reason} ->
 		    error_logger:error_msg("Send message: ~p error: ~p", [Msg, Reason]),
 		    apns_scheduler:send_message_failed(Msg),
-		    apns_scheduler:done_working(self())
+		    apns_scheduler:done_working(self()),
+		    {noreply, State#state{is_connected = true, out_socket = Socket, msg = Msg}}
 	    end;
 	error ->
 	    apns_scheduler:send_message_failed(Msg),
@@ -106,39 +107,30 @@ handle_cast(stop, State) ->
 %% @hidden
 -spec handle_info({ssl, tuple(), binary()} | {ssl_closed, tuple()} | X, state()) -> {noreply, state()} | {stop, ssl_closed | {unknown_request, X}, state()}.
 handle_info({ssl, SslSocket, Data}, State = #state{out_socket = SslSocket,
-                                                   connection =
-                                                     #apns_connection{error_fun = Error},
                                                    out_buffer = CurrentBuffer}) ->
     NewState = State#state{msg = undefined},
-  case <<CurrentBuffer/binary, Data/binary>> of
-    <<Command:1/unit:8, StatusCode:1/unit:8, MsgId:4/binary, Rest/binary>> ->
-      case Command of
-        8 -> %% Error
-	      apns_scheduler:send_message_failed(NewState#state.msg),
-          Status = parse_status(StatusCode),
-          try Error(MsgId, Status) of
-            stop -> throw({stop, {msg_error, MsgId, Status}, NewState});
-            _ -> noop
-          catch
-            _:ErrorResult ->
-              error_logger:error_msg("Error trying to inform error (~p) msg ~p:~n\t~p~n",
-                                     [Status, MsgId, ErrorResult])
-          end,
-          case erlang:size(Rest) of
-            0 -> {noreply, State#state{out_buffer = <<>>}}; %% It was a whole package
-            _ -> handle_info({ssl, SslSocket, Rest}, State#state{out_buffer = <<>>})
-          end;
-        Command ->
-          throw({stop, {unknown_command, Command}, NewState})
-      end;
-    NextBuffer -> %% We need to wait for the rest of the message
-      {noreply, State#state{out_buffer = NextBuffer}}
-  end;
+    case <<CurrentBuffer/binary, Data/binary>> of
+	<<Command:1/unit:8, StatusCode:1/unit:8, MsgId:4/binary, Rest/binary>> ->
+	    case Command of
+		8 -> %% Error
+		    Status = parse_status(StatusCode),
+		    error_logger:error_msg("Receive error from apns ~p, ~p", [MsgId, Status]),
+		    case erlang:size(Rest) of
+			0 -> {noreply, State#state{out_buffer = <<>>}}; %% It was a whole package
+			_ -> handle_info({ssl, SslSocket, Rest}, State#state{out_buffer = <<>>})
+		    end;
+
+		Command ->
+		    throw({stop, {unknown_command, Command}, NewState})
+	    end;
+	NextBuffer -> %% We need to wait for the rest of the message
+	    {noreply, State#state{out_buffer = NextBuffer}}
+    end;
 
 handle_info({ssl_closed, SslSocket}, State = #state{out_socket = SslSocket}) ->
-  {stop, normal, State};
+    {stop, normal, State};
 handle_info(Request, State) ->
-  {stop, {unknown_request, Request}, State}.
+    {stop, {unknown_request, Request}, State}.
 
 %% @hidden
 -spec terminate(term(), state()) -> ok.
@@ -195,10 +187,7 @@ send_payload(Socket, MsgId, Expiry, BinToken, Payload) ->
                 BinToken/binary,
                 PayloadLength:16/big,
                 BinPayload/binary>>],
-    error_logger:info_msg("Sending msg ~p (expires on ~p):~s~n~p~n",
-                         [MsgId, Expiry, BinPayload, Packet]),
-    ssl:send(Socket, Packet),
-    error_logger:info_msg("Sending done").
+    ssl:send(Socket, Packet).
 
 hexstr_to_bin(S) ->
   hexstr_to_bin(S, []).
@@ -210,12 +199,12 @@ hexstr_to_bin([X,Y|T], Acc) ->
   {ok, [V], []} = io_lib:fread("~16u", [X,Y]),
   hexstr_to_bin(T, [V | Acc]).
 
-bin_to_hexstr(Binary) ->
-    L = size(Binary),
-    Bits = L * 8,
-    <<X:Bits/big-unsigned-integer>> = Binary,
-    F = lists:flatten(io_lib:format("~~~B.16.0B", [L * 2])),
-    lists:flatten(io_lib:format(F, [X])).
+%% bin_to_hexstr(Binary) ->
+%%     L = size(Binary),
+%%     Bits = L * 8,
+%%     <<X:Bits/big-unsigned-integer>> = Binary,
+%%     F = lists:flatten(io_lib:format("~~~B.16.0B", [L * 2])),
+%%     lists:flatten(io_lib:format(F, [X])).
 
 parse_status(0) -> no_errors;
 parse_status(1) -> processing_error;
