@@ -1,45 +1,51 @@
 %%%-------------------------------------------------------------------
-%%% @hidden
-%%% @author Fernando Benavides <fernando.benavides@inakanetworks.com>
-%%% @copyright (C) 2010 Fernando Benavides <fernando.benavides@inakanetworks.com>
-%%% @doc apns4erl main supervisor
-%%% @end
+%%% File    : apns_sup.erl
+%%% Author  : Wang fei <fei@innlab.net>
+%%% Description : 
+%%%
+%%% Created : Wang fei <fei@innlab.net>
 %%%-------------------------------------------------------------------
 -module(apns_sup).
--author('Fernando Benavides <fernando.benavides@inakanetworks.com>').
 
 -behaviour(supervisor).
 
--include("apns.hrl").
+%% API
+-export([start_link/0]).
 
--export([start_link/0, start_connection/1, start_connection/2]).
+%% Supervisor callbacks
 -export([init/1]).
 
-%% ===================================================================
+-define(SERVER, ?MODULE).
+
+%%====================================================================
 %% API functions
-%% ===================================================================
-%% @hidden
--spec start_link() -> {ok, pid()} | ignore | {error, {already_started, pid()} | shutdown | term()}.
+%%====================================================================
+%%--------------------------------------------------------------------
+%% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
+%% Description: Starts the supervisor
+%%--------------------------------------------------------------------
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-%% @hidden
--spec start_connection(#apns_connection{}) -> {ok, pid()} | {error, term()}.
-start_connection(Connection) ->
-  supervisor:start_child(?MODULE, [Connection]).
-
-%% @hidden
--spec start_connection(atom(), #apns_connection{}) -> {ok, pid()} | {error, term()}.
-start_connection(Name, Connection) ->
-  supervisor:start_child(?MODULE, [Name, Connection]).
-
-%% ===================================================================
+%%====================================================================
 %% Supervisor callbacks
-%% ===================================================================
-%% @hidden
--spec init(_) ->  {ok, {{simple_one_for_one, 5, 10}, [{connection, {apns_connection, start_link, []}, transient, 5000, worker, [apns_connection]}]}}.
-init(_) ->
+%%====================================================================
+%%--------------------------------------------------------------------
+%% Func: init(Args) -> {ok,  {SupFlags,  [ChildSpec]}} |
+%%                     ignore                          |
+%%                     {error, Reason}
+%% Description: Whenever a supervisor is started using 
+%% supervisor:start_link/[2,3], this function is called by the new process 
+%% to find out about restart strategy, maximum restart frequency and child 
+%% specifications.
+%%--------------------------------------------------------------------
+init([]) ->
   {ok,
-   {{simple_one_for_one, 5, 10},
-    [{connection, {apns_connection, start_link, []},
-      transient, 5000, worker, [apns_connection]}]}}.
+   {{one_for_one, 5, 10},
+    [{apns_ssl_sup, {apns_ssl_sup, start_link, []},
+      transient, infinity, supervisor, [apns_ssl_sup]},
+    {apns_scheduler_sup, {apns_scheduler_sup, start_link, []},
+      transient, infinity, supervisor, [apns_scheduler_sup]}]}}.
+%%====================================================================
+%% Internal functions
+%%====================================================================

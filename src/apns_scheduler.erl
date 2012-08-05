@@ -193,4 +193,4 @@ send_message_via_new_connection(Msg, Connection) ->
     end.
 
 connect(Connection) ->
-    apns_sup:start_connection(Connection).
+    apns_ssl_sup:start_connection(Connection).
