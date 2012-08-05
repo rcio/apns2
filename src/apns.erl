@@ -24,6 +24,7 @@
 start() ->
   _ = application:start(public_key),
   _ = application:start(ssl),
+  _ = application:start(mnesia),
   application:start(apns).
 
 %% @doc Stops the application
